@@ -16,12 +16,18 @@ INSTALL_DIR := $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 SCHEMA_DIR  := $(INSTALL_DIR)/schemas
 DIST_DIR    := dist
 
-# Files to include in the installed extension (and .zip)
+# Files for local install (includes LICENSE for open-source compliance)
 EXTENSION_FILES := \
 	metadata.json \
 	extension.js \
 	prefs.js \
 	LICENSE
+
+# Files for portal upload (LICENSE excluded — portal validator rejects unknown root files)
+PORTAL_FILES := \
+	metadata.json \
+	extension.js \
+	prefs.js
 
 EXTENSION_DIRS := schemas sounds icons locale
 EXISTING_DIRS  := $(wildcard $(EXTENSION_DIRS))
@@ -97,13 +103,14 @@ pack: _check_deps _compile_schemas
 	@mkdir -p $(DIST_DIR)
 	@rm -f $(DIST_DIR)/$(UUID).zip
 	@zip -r $(DIST_DIR)/$(UUID).zip \
-		$(EXTENSION_FILES) \
+		$(PORTAL_FILES) \
 		$(EXISTING_DIRS) \
 		--exclude '*.pyc' \
 		--exclude '*/__pycache__/*' \
 		--exclude '*/.*'
 	@echo "✅ Extension packaged: $(DIST_DIR)/$(UUID).zip"
 	@echo "   Upload this file to: https://extensions.gnome.org/upload/"
+	@echo "   Contains: $(PORTAL_FILES) + directories: $(EXISTING_DIRS)"
 
 ## ── Translations template ───────────────────────────────────────────────────
 
