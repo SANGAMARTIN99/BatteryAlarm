@@ -12,6 +12,7 @@
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
+import Gdk from 'gi://Gdk';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 
@@ -272,6 +273,14 @@ class SoundPage extends Adw.PreferencesPage {
         });
         settings.bind('sound-enabled', soundEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         enableGroup.add(soundEnabledRow);
+
+        // Stop on unplug toggle
+        const stopOnUnplugRow = new Adw.SwitchRow({
+            title: _('Stop Alarm When Charger is Unplugged'),
+            subtitle: _('Automatically silences the alarm as soon as you disconnect the charger'),
+        });
+        settings.bind('stop-alarm-on-unplug', stopOnUnplugRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        enableGroup.add(stopOnUnplugRow);
 
         // ── Sound file group ──
         const fileGroup = new Adw.PreferencesGroup({
@@ -550,6 +559,87 @@ class GeneralPage extends Adw.PreferencesPage {
         const initialEnabled = settings.get_boolean('quiet-hours-enabled');
         quietStartRow.sensitive = initialEnabled;
         quietEndRow.sensitive   = initialEnabled;
+
+        // ── Silent Visual Alert group ──────────────────────────────────────
+        const visualGroup = new Adw.PreferencesGroup({
+            title: _('Silent Visual Alert'),
+            description: _('Blink a coloured border around the screen edges instead of — or in addition to — a sound. Useful in quiet environments.'),
+        });
+        this.add(visualGroup);
+
+        // Enable toggle
+        const visualEnabledRow = new Adw.SwitchRow({
+            title: _('Enable Screen-Edge Flash'),
+            subtitle: _('Show a coloured blinking border on screen edges when an alarm triggers'),
+        });
+        settings.bind('visual-alert-enabled', visualEnabledRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        visualGroup.add(visualEnabledRow);
+
+        // Colour picker row
+        const colorRow = new Adw.ActionRow({
+            title: _('Flash Colour'),
+            subtitle: _('Choose the colour for the screen-edge blink effect'),
+        });
+
+        // Parse the stored hex into a Gdk.RGBA
+        const storedColor = settings.get_string('visual-alert-color') || '#00CC66';
+        let colorButton;
+        try {
+            const rgba = new Gdk.RGBA();
+            rgba.parse(storedColor);
+
+            const colorDialog = new Gtk.ColorDialog({
+                title: _('Choose Flash Colour'),
+                with_alpha: false,
+            });
+            colorButton = new Gtk.ColorDialogButton({
+                dialog: colorDialog,
+                rgba,
+                valign: Gtk.Align.CENTER,
+            });
+            colorButton.connect('notify::rgba', () => {
+                const r = colorButton.rgba;
+                // Convert Gdk.RGBA to CSS hex string
+                const toHex = v => Math.round(v * 255).toString(16).padStart(2, '0');
+                const hex = `#${toHex(r.red)}${toHex(r.green)}${toHex(r.blue)}`;
+                settings.set_string('visual-alert-color', hex.toUpperCase());
+            });
+        } catch (_) {
+            // Fallback: plain text entry if Gtk.ColorDialogButton isn't available
+            colorButton = new Gtk.Entry({
+                text: storedColor,
+                valign: Gtk.Align.CENTER,
+                max_length: 7,
+                placeholder_text: '#00CC66',
+                tooltip_text: _('CSS hex colour, e.g. #00CC66'),
+            });
+            colorButton.connect('changed', () => {
+                const val = colorButton.text.trim();
+                if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                    settings.set_string('visual-alert-color', val.toUpperCase());
+                }
+            });
+        }
+        colorRow.add_suffix(colorButton);
+        visualGroup.add(colorRow);
+
+        // Duration spin row
+        const durationRow = new Adw.SpinRow({
+            title: _('Flash Duration (seconds)'),
+            subtitle: _('How long the screen-edge flash runs. Set to 0 to keep flashing until alarm is stopped'),
+            adjustment: new Gtk.Adjustment({lower: 0, upper: 300, step_increment: 5, value: 30}),
+        });
+        settings.bind('visual-alert-duration', durationRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+        visualGroup.add(durationRow);
+
+        // Sensitivity: sub-rows depend on the main enable toggle
+        const updateVisualSensitivity = () => {
+            const on = settings.get_boolean('visual-alert-enabled');
+            colorRow.sensitive    = on;
+            durationRow.sensitive = on;
+        };
+        settings.connect('changed::visual-alert-enabled', updateVisualSensitivity);
+        updateVisualSensitivity();
     }
 });
 

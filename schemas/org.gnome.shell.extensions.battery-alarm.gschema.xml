@@ -105,5 +105,32 @@
       <description>JSON object mapping threshold IDs to their last trigger timestamp, used for cooldown logic.</description>
     </key>
 
+    <!-- Auto-stop on unplug -->
+    <key name="stop-alarm-on-unplug" type="b">
+      <default>true</default>
+      <summary>Stop alarm when charger is unplugged</summary>
+      <description>Automatically stop the alarm sound and visual alert when the charger is disconnected from the device.</description>
+    </key>
+
+    <!-- Visual alert (screen-edge flash) -->
+    <key name="visual-alert-enabled" type="b">
+      <default>false</default>
+      <summary>Enable silent screen-edge visual alert</summary>
+      <description>Flash a colored border around the screen edges when a threshold is triggered. Useful in quiet environments where sound is not appropriate.</description>
+    </key>
+
+    <key name="visual-alert-color" type="s">
+      <default>'#00CC66'</default>
+      <summary>Screen-edge flash color</summary>
+      <description>Hex color string (e.g. #00CC66) for the screen-edge blinking visual alert.</description>
+    </key>
+
+    <key name="visual-alert-duration" type="i">
+      <default>30</default>
+      <range min="0" max="300"/>
+      <summary>Visual alert duration (seconds)</summary>
+      <description>How many seconds the screen-edge flash runs. Set to 0 to keep flashing until the charger is unplugged or the alarm is manually stopped.</description>
+    </key>
+
   </schema>
 </schemalist>

@@ -406,6 +406,119 @@ class QuietHoursChecker {
     }
 }
 
+// ─── ScreenEdgeFlasher ───────────────────────────────────────────────────────
+
+/**
+ * Creates four thin overlay actors — one per screen edge — that blink with
+ * a user-selected colour, providing a silent visual battery alert.
+ *
+ * The actors live in the chrome layer so they sit above all windows but are
+ * still removed cleanly when the extension is disabled.
+ */
+class ScreenEdgeFlasher {
+    /**
+     * @param {string} hexColor  - CSS hex colour string, e.g. '#00CC66'
+     * @param {number} durationSec - Seconds to flash (0 = until stop() is called)
+     */
+    constructor(hexColor, durationSec) {
+        this._hexColor   = hexColor || '#00CC66';
+        this._duration   = durationSec; // 0 means indefinite
+        this._actors     = [];
+        this._blinkTimer  = null;
+        this._stopTimer   = null;
+        this._blinkState  = true; // true = visible, false = hidden
+    }
+
+    start() {
+        this._createActors();
+        this._startBlink();
+
+        if (this._duration > 0) {
+            this._stopTimer = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT,
+                this._duration,
+                () => {
+                    this.stop();
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
+        }
+    }
+
+    _createActors() {
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!monitor) return;
+
+        const THICKNESS = 18; // px — edge width
+        const {x, y, width, height} = monitor;
+        const color = this._hexColor;
+
+        // Define edges: [x, y, w, h]
+        const edges = [
+            [x,                          y,                           width,     THICKNESS], // top
+            [x,                          y + height - THICKNESS,      width,     THICKNESS], // bottom
+            [x,                          y + THICKNESS,               THICKNESS, height - THICKNESS * 2], // left
+            [x + width - THICKNESS,      y + THICKNESS,               THICKNESS, height - THICKNESS * 2], // right
+        ];
+
+        for (const [ex, ey, ew, eh] of edges) {
+            const actor = new St.Bin({
+                style:   `background-color: ${color};`,
+                opacity: 0,
+                reactive: false,
+                can_focus: false,
+            });
+            actor.set_position(ex, ey);
+            actor.set_size(ew, eh);
+            Main.layoutManager.addChrome(actor, {trackFullscreen: true});
+            this._actors.push(actor);
+        }
+    }
+
+    _startBlink() {
+        // Toggle opacity every 500 ms → 1 Hz blink
+        this._blinkTimer = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            500,
+            () => {
+                if (this._actors.length === 0) return GLib.SOURCE_REMOVE;
+                this._blinkState = !this._blinkState;
+                const opacity = this._blinkState ? 220 : 0;
+                for (const actor of this._actors) {
+                    actor.ease({
+                        opacity,
+                        duration: 300,
+                        mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
+                    });
+                }
+                return GLib.SOURCE_CONTINUE;
+            }
+        );
+    }
+
+    stop() {
+        if (this._blinkTimer) {
+            GLib.source_remove(this._blinkTimer);
+            this._blinkTimer = null;
+        }
+        if (this._stopTimer) {
+            GLib.source_remove(this._stopTimer);
+            this._stopTimer = null;
+        }
+        for (const actor of this._actors) {
+            try {
+                Main.layoutManager.removeChrome(actor);
+                actor.destroy();
+            } catch (_) {}
+        }
+        this._actors = [];
+    }
+
+    destroy() {
+        this.stop();
+    }
+}
+
 // ─── Panel Indicator ─────────────────────────────────────────────────────────
 
 const BatteryAlarmIndicator = GObject.registerClass(
@@ -462,6 +575,22 @@ class BatteryAlarmIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
+        // ── Stop Alarm button (hidden until an alarm is active) ──
+        this._stopAlarmItem = new PopupMenu.PopupMenuItem(
+            _('⛔  Stop Alarm Now'),
+            {style_class: 'battery-alarm-stop-item'}
+        );
+        this._stopAlarmItem.connect('activate', () => {
+            this.menu.close();
+            this._onStopAlarm?.();
+        });
+        this._stopAlarmItem.actor.hide();
+        this.menu.addMenuItem(this._stopAlarmItem);
+
+        this._stopSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this._stopSeparator.actor.hide();
+        this.menu.addMenuItem(this._stopSeparator);
+
         // Mute toggle
         this._muteSwitch = new PopupMenu.PopupSwitchMenuItem(
             _('Mute All Alarms'),
@@ -485,6 +614,23 @@ class BatteryAlarmIndicator extends PanelMenu.Button {
             this._openPrefs?.();
         });
         this.menu.addMenuItem(prefsItem);
+    }
+
+    /**
+     * Show the "Stop Alarm Now" button in the panel menu.
+     * @param {Function} callback - Called when the user taps the stop button.
+     */
+    showStopButton(callback) {
+        this._onStopAlarm = callback;
+        this._stopAlarmItem?.actor.show();
+        this._stopSeparator?.actor.show();
+    }
+
+    /** Hide the "Stop Alarm Now" button once the alarm has ended. */
+    hideStopButton() {
+        this._onStopAlarm = null;
+        this._stopAlarmItem?.actor.hide();
+        this._stopSeparator?.actor.hide();
     }
 
     updateBatteryStatus(percent, state) {
@@ -574,7 +720,7 @@ export default class BatteryAlarmExtension extends Extension {
     enable() {
         console.log('[BatteryAlarm] Enabling extension…');
 
-        this._settings = this.getSettings();
+        this._settings    = this.getSettings();
         this._extensionDir = this.path;
 
         // Core components
@@ -582,6 +728,10 @@ export default class BatteryAlarmExtension extends Extension {
         this._player   = new AlarmPlayer(this._extensionDir);
         this._checker  = new ThresholdChecker(this._settings);
         this._quietChk = new QuietHoursChecker(this._settings);
+
+        // Alarm state tracking
+        this._alarmActive   = false;
+        this._edgeFlasher   = null;
 
         // Previous battery state (for crossing detection)
         this._prevPercent = -1;
@@ -623,6 +773,9 @@ export default class BatteryAlarmExtension extends Extension {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = null;
         }
+
+        // Stop any active alarm immediately
+        this._stopActiveAlarm();
 
         this._monitor?.stop();
         this._player?.destroy();
@@ -669,6 +822,19 @@ export default class BatteryAlarmExtension extends Extension {
         // Update panel indicator
         this._indicator?.updateBatteryStatus(percent, state);
 
+        // ── Auto-stop on charger unplug ──────────────────────────────────────
+        // If an alarm is currently firing and the state just transitioned to
+        // DISCHARGING (charger physically removed), stop everything immediately.
+        if (this._alarmActive &&
+            this._settings?.get_boolean('stop-alarm-on-unplug') &&
+            this._prevState !== BatteryState.DISCHARGING &&
+            this._prevState !== BatteryState.UNKNOWN &&
+            (state === BatteryState.DISCHARGING ||
+             state === BatteryState.PENDING_DISCHARGE)) {
+            console.log('[BatteryAlarm] Charger unplugged — stopping active alarm');
+            this._stopActiveAlarm();
+        }
+
         // Check thresholds (skip if first read or muted globally)
         if (this._prevPercent >= 0) {
             if (!this._settings.get_boolean('muted')) {
@@ -678,6 +844,28 @@ export default class BatteryAlarmExtension extends Extension {
 
         this._prevPercent = percent;
         this._prevState   = state;
+    }
+
+    /**
+     * Stop all active alarm output: sound + screen-edge flash + panel button.
+     * Safe to call even if no alarm is active.
+     */
+    _stopActiveAlarm() {
+        this._alarmActive = false;
+
+        // Stop sound
+        this._player?.stop();
+
+        // Stop visual edge flash
+        if (this._edgeFlasher) {
+            this._edgeFlasher.stop();
+            this._edgeFlasher = null;
+        }
+
+        // Hide the stop button in the panel menu
+        this._indicator?.hideStopButton();
+
+        console.log('[BatteryAlarm] Alarm stopped');
     }
 
     _checkThresholds(percent, state) {
@@ -703,7 +891,10 @@ export default class BatteryAlarmExtension extends Extension {
     }
 
     _triggerAlarm(threshold, currentPercent) {
-        // Play sound
+        // Mark alarm as active
+        this._alarmActive = true;
+
+        // ── Sound ────────────────────────────────────────────────────────────
         if (this._settings.get_boolean('sound-enabled')) {
             this._player.play(
                 this._settings.get_string('sound-file'),
@@ -713,13 +904,32 @@ export default class BatteryAlarmExtension extends Extension {
             );
         }
 
-        // Show notification
+        // ── GNOME Notification ───────────────────────────────────────────────
         if (this._settings.get_boolean('notifications-enabled')) {
             this._showNotification(threshold, currentPercent);
         }
 
-        // Flash panel icon
+        // ── Panel icon flash ─────────────────────────────────────────────────
         this._indicator?.flashAlarm(threshold.label);
+
+        // ── Screen-edge visual alert ─────────────────────────────────────────
+        if (this._settings.get_boolean('visual-alert-enabled')) {
+            // Stop any prior flasher before creating a new one
+            if (this._edgeFlasher) {
+                this._edgeFlasher.stop();
+                this._edgeFlasher = null;
+            }
+            const color    = this._settings.get_string('visual-alert-color');
+            const duration = this._settings.get_int('visual-alert-duration');
+            this._edgeFlasher = new ScreenEdgeFlasher(color, duration);
+            this._edgeFlasher.start();
+        }
+
+        // ── Show Stop button in panel menu ───────────────────────────────────
+        this._indicator?.showStopButton(() => {
+            console.log('[BatteryAlarm] User manually stopped alarm');
+            this._stopActiveAlarm();
+        });
     }
 
     _showNotification(threshold, percent) {
