@@ -1,0 +1,338 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the battery-alarm package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: battery-alarm\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-08 17:47+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: extension.js:414 extension.js:451
+msgid "BatteryAlarm"
+msgstr ""
+
+#: extension.js:467
+msgid "Mute All Alarms"
+msgstr ""
+
+#: extension.js:481
+msgid "Settings…"
+msgstr ""
+
+#: extension.js:502
+msgid "Charging"
+msgstr ""
+
+#: extension.js:503
+msgid "Discharging"
+msgstr ""
+
+#: extension.js:504
+msgid "Fully Charged"
+msgstr ""
+
+#: extension.js:505
+msgid "Empty"
+msgstr ""
+
+#: extension.js:506
+msgid "Pending Charge"
+msgstr ""
+
+#: extension.js:507
+msgid "Unknown"
+msgstr ""
+
+#: extension.js:726
+msgid "Battery Alarm"
+msgstr ""
+
+#: extension.js:728
+msgid "while charging"
+msgstr ""
+
+#: extension.js:730
+msgid "while discharging"
+msgstr ""
+
+#: extension.js:733
+msgid "."
+msgstr ""
+
+#: prefs.js:49
+msgid "Label"
+msgstr ""
+
+#: prefs.js:70
+msgid "Battery percentage to trigger alarm"
+msgstr ""
+
+#: prefs.js:86
+msgid "While Charging"
+msgstr ""
+
+#: prefs.js:87
+msgid "While Discharging"
+msgstr ""
+
+#: prefs.js:88
+msgid "Any Direction"
+msgstr ""
+
+#: prefs.js:97
+msgid "When to trigger: charging, discharging, or either"
+msgstr ""
+
+#: prefs.js:109
+msgid "Delete this threshold"
+msgstr ""
+
+#: prefs.js:128
+msgid "Thresholds"
+msgstr ""
+
+#: prefs.js:137
+msgid "Battery Alarm Thresholds"
+msgstr ""
+
+#: prefs.js:138
+msgid ""
+"Configure the battery percentage levels that will trigger an alarm. You can "
+"add up to 10 custom thresholds."
+msgstr ""
+
+#: prefs.js:144
+msgid "Add Threshold"
+msgstr ""
+
+#: prefs.js:157
+msgid ""
+"Tip: Set a threshold near your current battery level to test alarms "
+"immediately."
+msgstr ""
+
+#: prefs.js:159
+msgid "Dismiss"
+msgstr ""
+
+#: prefs.js:195
+msgid "Maximum of 10 thresholds reached."
+msgstr ""
+
+#: prefs.js:204
+msgid "New Threshold"
+msgstr ""
+
+#: prefs.js:256
+msgid "Sound"
+msgstr ""
+
+#: prefs.js:265
+msgid "Alarm Sound"
+msgstr ""
+
+#: prefs.js:270
+msgid "Enable Alarm Sound"
+msgstr ""
+
+#: prefs.js:271
+msgid "Play an audio alert when a battery threshold is reached"
+msgstr ""
+
+#: prefs.js:278
+msgid "Sound File"
+msgstr ""
+
+#: prefs.js:279
+msgid ""
+"Choose a custom .ogg, .wav, or .mp3 alarm sound, or use the built-in default."
+msgstr ""
+
+#: prefs.js:285
+msgid "Custom Sound File"
+msgstr ""
+
+#: prefs.js:286
+msgid "Leave empty to use the bundled default alarm chime"
+msgstr ""
+
+#: prefs.js:291 prefs.js:313
+msgid "Default sound"
+msgstr ""
+
+#: prefs.js:300
+msgid "Choose…"
+msgstr ""
+
+#: prefs.js:308
+msgid "Reset"
+msgstr ""
+
+#: prefs.js:320
+msgid "Playback Settings"
+msgstr ""
+
+#: prefs.js:339
+msgid "Volume"
+msgstr ""
+
+#: prefs.js:340
+msgid "Alarm sound volume (0 = silent, 100 = full)"
+msgstr ""
+
+#: prefs.js:347
+msgid "Repeat Count"
+msgstr ""
+
+#: prefs.js:348
+msgid "Number of times the alarm sound plays"
+msgstr ""
+
+#: prefs.js:356
+msgid "Repeat Interval (seconds)"
+msgstr ""
+
+#: prefs.js:357
+msgid "Seconds between each repetition"
+msgstr ""
+
+#: prefs.js:368
+msgid "▶  Test Alarm Sound"
+msgstr ""
+
+#: prefs.js:378
+msgid "Choose Alarm Sound File"
+msgstr ""
+
+#: prefs.js:379
+msgid "Select"
+msgstr ""
+
+#: prefs.js:384
+msgid "Audio Files"
+msgstr ""
+
+#: prefs.js:435
+msgid "General"
+msgstr ""
+
+#: prefs.js:441
+msgid "Panel Indicator"
+msgstr ""
+
+#: prefs.js:446
+msgid "Show Panel Indicator"
+msgstr ""
+
+#: prefs.js:447
+msgid "Display a BatteryAlarm icon in the top system panel"
+msgstr ""
+
+#: prefs.js:453
+msgid "Show Battery Percentage in Panel"
+msgstr ""
+
+#: prefs.js:454
+msgid "Display the current battery percentage next to the panel icon"
+msgstr ""
+
+#: prefs.js:461
+msgid "Notifications"
+msgstr ""
+
+#: prefs.js:466
+msgid "Show Desktop Notifications"
+msgstr ""
+
+#: prefs.js:467
+msgid "Display a system notification when an alarm triggers"
+msgstr ""
+
+#: prefs.js:474
+msgid "Cooldown"
+msgstr ""
+
+#: prefs.js:475
+msgid ""
+"Minimum time between successive alarms for the same threshold, to prevent "
+"repeated notifications."
+msgstr ""
+
+#: prefs.js:480
+msgid "Cooldown Duration (minutes)"
+msgstr ""
+
+#: prefs.js:481
+msgid ""
+"Alarms for the same threshold are silenced for this many minutes after firing"
+msgstr ""
+
+#: prefs.js:489
+msgid "Quiet Hours"
+msgstr ""
+
+#: prefs.js:490
+msgid "Silence all alarms during specified hours (e.g., overnight)."
+msgstr ""
+
+#: prefs.js:495
+msgid "Enable Quiet Hours"
+msgstr ""
+
+#: prefs.js:501
+msgid "Quiet Hours Start (HH:MM)"
+msgstr ""
+
+#: prefs.js:523
+msgid "Quiet Hours End (HH:MM)"
+msgstr ""
+
+#: prefs.js:563
+msgid "About"
+msgstr ""
+
+#: prefs.js:594
+msgid "Version"
+msgstr ""
+
+#: prefs.js:600
+msgid "Customizable battery threshold alarms for GNOME Shell"
+msgstr ""
+
+#: prefs.js:611
+msgid "Links"
+msgstr ""
+
+#: prefs.js:615
+msgid "Source Code on GitHub"
+msgstr ""
+
+#: prefs.js:616
+msgid "Report an Issue"
+msgstr ""
+
+#: prefs.js:617
+msgid "GNOME Extensions Page"
+msgstr ""
+
+#: prefs.js:633
+msgid "License"
+msgstr ""
+
+#: prefs.js:638
+msgid "This extension is free and open source software."
+msgstr ""
+
+#: prefs.js:653
+msgid "BatteryAlarm Settings"
+msgstr ""

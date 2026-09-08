@@ -416,6 +416,7 @@ class BatteryAlarmIndicator extends PanelMenu.Button {
         this._settings = settings;
         this._onMuteToggle = onMuteToggle;
         this._muted = settings.get_boolean('muted');
+        this._flashTimeoutId = null;
 
         // ── Icon + Label box ──
         this._box = new St.BoxLayout({
@@ -515,11 +516,17 @@ class BatteryAlarmIndicator extends PanelMenu.Button {
     }
 
     flashAlarm(thresholdLabel) {
-        // Brief visual pulse on the panel icon to draw attention
-        const origColor = this._icon.style;
+        if (!this._icon) return;
+        if (this._flashTimeoutId) {
+            GLib.source_remove(this._flashTimeoutId);
+            this._flashTimeoutId = null;
+        }
         this._icon.add_style_class_name('battery-alarm-flash');
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
-            this._icon.remove_style_class_name('battery-alarm-flash');
+        this._flashTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
+            if (this._icon) {
+                this._icon.remove_style_class_name('battery-alarm-flash');
+            }
+            this._flashTimeoutId = null;
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -549,6 +556,10 @@ class BatteryAlarmIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        if (this._flashTimeoutId) {
+            GLib.source_remove(this._flashTimeoutId);
+            this._flashTimeoutId = null;
+        }
         if (this._settingsSignal) {
             this._settings.disconnect(this._settingsSignal);
             this._settingsSignal = null;

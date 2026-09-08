@@ -23,13 +23,10 @@ EXTENSION_FILES := \
 	prefs.js \
 	LICENSE
 
-EXTENSION_DIRS := \
-	schemas \
-	sounds \
-	icons \
-	po
+EXTENSION_DIRS := schemas sounds icons locale
+EXISTING_DIRS  := $(wildcard $(EXTENSION_DIRS))
 
-.PHONY: all install uninstall enable disable pack dev clean sound schemas help
+.PHONY: all install uninstall enable disable pack dev clean sound schemas pot help
 
 all: help
 
@@ -98,14 +95,21 @@ dev: install enable
 
 pack: _check_deps _compile_schemas
 	@mkdir -p $(DIST_DIR)
+	@rm -f $(DIST_DIR)/$(UUID).zip
 	@zip -r $(DIST_DIR)/$(UUID).zip \
 		$(EXTENSION_FILES) \
-		$(EXTENSION_DIRS) \
+		$(EXISTING_DIRS) \
 		--exclude '*.pyc' \
 		--exclude '*/__pycache__/*' \
 		--exclude '*/.*'
 	@echo "✅ Extension packaged: $(DIST_DIR)/$(UUID).zip"
 	@echo "   Upload this file to: https://extensions.gnome.org/upload/"
+
+## ── Translations template ───────────────────────────────────────────────────
+
+pot:
+	@xgettext --from-code=UTF-8 --keyword=_ --keyword=ngettext:1,2 --keyword=pgettext:1c,2 --package-name="battery-alarm" --output=po/battery-alarm.pot extension.js prefs.js
+	@echo "✅ Translation template generated: po/battery-alarm.pot"
 
 ## ── Sound generation ─────────────────────────────────────────────────────────
 

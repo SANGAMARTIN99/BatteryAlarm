@@ -510,7 +510,9 @@ class GeneralPage extends Adw.PreferencesPage {
             } else {
                 quietStartRow.add_css_class('error');
                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
-                    quietStartRow.remove_css_class('error');
+                    try {
+                        quietStartRow.remove_css_class('error');
+                    } catch (_) {}
                     return GLib.SOURCE_REMOVE;
                 });
             }
@@ -530,7 +532,9 @@ class GeneralPage extends Adw.PreferencesPage {
             } else {
                 quietEndRow.add_css_class('error');
                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
-                    quietEndRow.remove_css_class('error');
+                    try {
+                        quietEndRow.remove_css_class('error');
+                    } catch (_) {}
                     return GLib.SOURCE_REMOVE;
                 });
             }
