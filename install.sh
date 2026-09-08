@@ -178,5 +178,5 @@ ${GREEN}${BOLD}─────────────────────�
   3. Open ${BOLD}Settings → Configure thresholds${RESET} to customize your alarms
 
   To uninstall:  ${BOLD}./install.sh --uninstall${RESET}
-  Report issues: ${BOLD}https://github.com/mastesa/battery-alarm-gnome/issues${RESET}
+  Report issues: ${BOLD}https://github.com/SANGAMARTIN99/BatteryAlarm/issues${RESET}
 "

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libglib2.0-bin zip python3 gettext
+
+      - name: Validate metadata.json
+        run: |
+          python3 -c "
+          import json
+          with open('metadata.json') as f:
+              data = json.load(f)
+          required_keys = ['name', 'description', 'uuid', 'shell-version']
+          for key in required_keys:
+              assert key in data, f'Missing required metadata key: {key}'
+          assert len(data['shell-version']) > 0, 'shell-version list cannot be empty'
+          print('✅ metadata.json is valid!')
+          "
+
+      - name: Compile and validate GSettings schemas
+        run: |
+          glib-compile-schemas --strict schemas/
+          echo "✅ GSettings schemas compiled successfully!"
+
+      - name: Package extension (make pack)
+        run: |
+          make pack
+
+      - name: Verify package integrity
+        run: |
+          ZIP_FILE=$(ls dist/*.zip)
+          echo "Checking package: $ZIP_FILE"
+          unzip -l "$ZIP_FILE"
+          unzip -t "$ZIP_FILE"
+          echo "✅ Extension package verified successfully!"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: battery-alarm-extension-package
+          path: dist/*.zip

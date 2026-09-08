@@ -4,7 +4,7 @@
   "uuid": "battery-alarm@mastesa.github.com",
   "version": 1,
   "shell-version": ["45", "46", "47"],
-  "url": "https://github.com/mastesa/battery-alarm-gnome",
+  "url": "https://github.com/SANGAMARTIN99/BatteryAlarm",
   "settings-schema": "org.gnome.shell.extensions.battery-alarm",
   "gettext-domain": "battery-alarm"
 }

@@ -39,8 +39,8 @@ BatteryAlarm is an open-source **GNOME Shell extension** that plays configurable
 ## 🚀 Quick Install
 
 ```bash
-git clone https://github.com/mastesa/battery-alarm-gnome
-cd battery-alarm-gnome
+git clone https://github.com/SANGAMARTIN99/BatteryAlarm
+cd BatteryAlarm
 chmod +x install.sh
 ./install.sh
 ```
@@ -153,8 +153,8 @@ A **cooldown period** prevents the same threshold from triggering again within N
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- 🐛 Report bugs: [GitHub Issues](https://github.com/mastesa/battery-alarm-gnome/issues)
-- 💬 Discuss: [GitHub Discussions](https://github.com/mastesa/battery-alarm-gnome/discussions)
+- 🐛 Report bugs: [GitHub Issues](https://github.com/SANGAMARTIN99/BatteryAlarm/issues)
+- 💬 Discuss: [GitHub Discussions](https://github.com/SANGAMARTIN99/BatteryAlarm/discussions)
 - 🌐 Translations: Add `.po` files in the `po/` directory
 
 ---
