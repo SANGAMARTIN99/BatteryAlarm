@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  battery-alarm-muted-symbolic.svg
+  Muted state panel icon for BatteryAlarm GNOME Shell Extension.
+  Shows battery with a crossed-out bell (muted alarm).
+  SPDX-License-Identifier: CC0-1.0
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 16 16"
+     width="16" height="16">
+
+  <!-- Battery body -->
+  <rect x="1" y="4" width="12" height="8" rx="1.5" ry="1.5"
+        style="fill:currentColor;fill-opacity:0.3;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round"/>
+
+  <!-- Battery terminal -->
+  <rect x="13" y="6.5" width="1.5" height="3" rx="0.75" ry="0.75"
+        style="fill:currentColor;fill-opacity:0.8"/>
+
+  <!-- Reduced battery fill (muted = not paying attention to charge) -->
+  <rect x="2.5" y="5.5" width="4" height="5" rx="0.5" ry="0.5"
+        style="fill:currentColor;fill-opacity:0.5"/>
+
+  <!-- Crossed-out bell (muted) -->
+  <g transform="translate(7.5, 6.5) scale(0.38)">
+    <path d="M8,1 C5.24,1 3,3.24 3,6 L3,10 L1,12 L15,12 L13,10 L13,6 C13,3.24 10.76,1 8,1 Z"
+          style="fill:currentColor;fill-opacity:0.4"/>
+    <!-- X strike-through line -->
+    <line x1="2" y1="2" x2="14" y2="14"
+          style="stroke:currentColor;stroke-width:2;stroke-linecap:round"/>
+  </g>
+</svg>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.battery-alarm"
+          path="/org/gnome/shell/extensions/battery-alarm/">
+
+    <!-- Thresholds: stored as JSON string array for flexibility -->
+    <key name="thresholds" type="s">
+      <default>'[{"id":"t1","percent":100,"direction":"charging","enabled":true,"label":"Battery Full"},{"id":"t2","percent":20,"direction":"discharging","enabled":true,"label":"Low Battery"},{"id":"t3","percent":80,"direction":"charging","enabled":false,"label":"Stop Charging (Health)"}]'</default>
+      <summary>Battery threshold configurations</summary>
+      <description>JSON string containing an array of threshold objects with id, percent, direction, enabled, and label fields.</description>
+    </key>
+
+    <!-- Sound settings -->
+    <key name="sound-file" type="s">
+      <default>''</default>
+      <summary>Custom alarm sound file path</summary>
+      <description>Path to a custom .ogg/.wav/.mp3 file. Empty string means use the bundled default alarm sound.</description>
+    </key>
+
+    <key name="alarm-volume" type="d">
+      <default>0.8</default>
+      <range min="0.0" max="1.0"/>
+      <summary>Alarm volume</summary>
+      <description>Volume level for the alarm sound, ranging from 0.0 (silent) to 1.0 (full volume).</description>
+    </key>
+
+    <key name="sound-enabled" type="b">
+      <default>true</default>
+      <summary>Enable alarm sound</summary>
+      <description>Whether to play an alarm sound when a threshold is reached.</description>
+    </key>
+
+    <key name="repeat-count" type="i">
+      <default>3</default>
+      <range min="1" max="10"/>
+      <summary>Number of times to repeat alarm</summary>
+      <description>How many times the alarm sound will play when a threshold is triggered.</description>
+    </key>
+
+    <key name="repeat-interval" type="i">
+      <default>2</default>
+      <range min="1" max="30"/>
+      <summary>Interval between repeats (seconds)</summary>
+      <description>Seconds between each alarm repetition.</description>
+    </key>
+
+    <!-- Cooldown settings -->
+    <key name="cooldown-minutes" type="i">
+      <default>5</default>
+      <range min="1" max="120"/>
+      <summary>Cooldown period in minutes</summary>
+      <description>Minimum minutes between successive alarms for the same threshold, preventing alarm spam.</description>
+    </key>
+
+    <!-- Notification settings -->
+    <key name="notifications-enabled" type="b">
+      <default>true</default>
+      <summary>Enable desktop notifications</summary>
+      <description>Whether to show a desktop notification when a threshold is reached.</description>
+    </key>
+
+    <!-- Quiet hours -->
+    <key name="quiet-hours-enabled" type="b">
+      <default>false</default>
+      <summary>Enable quiet hours</summary>
+      <description>Silence alarms during specified quiet hours.</description>
+    </key>
+
+    <key name="quiet-hours-start" type="s">
+      <default>'22:00'</default>
+      <summary>Quiet hours start time</summary>
+      <description>Time (HH:MM, 24h format) when quiet hours begin.</description>
+    </key>
+
+    <key name="quiet-hours-end" type="s">
+      <default>'07:00'</default>
+      <summary>Quiet hours end time</summary>
+      <description>Time (HH:MM, 24h format) when quiet hours end.</description>
+    </key>
+
+    <!-- Panel indicator -->
+    <key name="show-panel-indicator" type="b">
+      <default>true</default>
+      <summary>Show panel indicator</summary>
+      <description>Whether to show a battery alarm indicator icon in the top panel.</description>
+    </key>
+
+    <key name="show-percentage-in-panel" type="b">
+      <default>false</default>
+      <summary>Show battery percentage in panel</summary>
+      <description>Whether to show the current battery percentage next to the panel indicator.</description>
+    </key>
+
+    <!-- Quick mute -->
+    <key name="muted" type="b">
+      <default>false</default>
+      <summary>Mute all alarms</summary>
+      <description>Temporarily mute all battery alarms. Can be toggled from the panel indicator.</description>
+    </key>
+
+    <!-- Extension state -->
+    <key name="last-alarm-times" type="s">
+      <default>'{}'</default>
+      <summary>Last alarm trigger times per threshold</summary>
+      <description>JSON object mapping threshold IDs to their last trigger timestamp, used for cooldown logic.</description>
+    </key>
+
+  </schema>
+</schemalist>
