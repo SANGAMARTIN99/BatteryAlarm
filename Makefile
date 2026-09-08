@@ -20,7 +20,8 @@ DIST_DIR    := dist
 EXTENSION_FILES := \
 	metadata.json \
 	extension.js \
-	prefs.js
+	prefs.js \
+	LICENSE
 
 EXTENSION_DIRS := \
 	schemas \

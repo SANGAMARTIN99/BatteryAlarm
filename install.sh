@@ -138,6 +138,7 @@ mkdir -p "$INSTALL_DIR"
 cp -v "$SCRIPT_DIR/metadata.json"  "$INSTALL_DIR/"
 cp -v "$SCRIPT_DIR/extension.js"   "$INSTALL_DIR/"
 cp -v "$SCRIPT_DIR/prefs.js"       "$INSTALL_DIR/"
+[[ -f "$SCRIPT_DIR/LICENSE" ]] && cp -v "$SCRIPT_DIR/LICENSE" "$INSTALL_DIR/"
 
 # Copy directories
 for d in schemas sounds icons po; do
