@@ -32,10 +32,16 @@ jobs:
           print('✅ metadata.json is valid!')
           "
 
+      - name: Validate JavaScript syntax
+        run: |
+          node --check extension.js
+          node --check prefs.js
+          echo "✅ JavaScript syntax validated!"
+
       - name: Compile and validate GSettings schemas
         run: |
-          glib-compile-schemas --strict schemas/
-          echo "✅ GSettings schemas compiled successfully!"
+          glib-compile-schemas --strict --dry-run schemas/
+          echo "✅ GSettings schemas validated successfully!"
 
       - name: Package extension (make pack)
         run: |
@@ -43,10 +49,14 @@ jobs:
 
       - name: Verify package integrity
         run: |
-          ZIP_FILE=$(ls dist/*.zip)
+          ZIP_FILE=$(ls dist/*.zip | head -n 1)
           echo "Checking package: $ZIP_FILE"
           unzip -l "$ZIP_FILE"
           unzip -t "$ZIP_FILE"
+          if unzip -l "$ZIP_FILE" | grep -q "gschemas.compiled"; then
+            echo "❌ Error: gschemas.compiled must not be shipped in the extension package!"
+            exit 1
+          fi
           echo "✅ Extension package verified successfully!"
 
       - name: Upload build artifact

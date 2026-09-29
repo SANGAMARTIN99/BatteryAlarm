@@ -98,12 +98,6 @@
       <description>Temporarily mute all battery alarms. Can be toggled from the panel indicator.</description>
     </key>
 
-    <!-- Extension state -->
-    <key name="last-alarm-times" type="s">
-      <default>'{}'</default>
-      <summary>Last alarm trigger times per threshold</summary>
-      <description>JSON object mapping threshold IDs to their last trigger timestamp, used for cooldown logic.</description>
-    </key>
 
     <!-- Auto-stop on unplug -->
     <key name="stop-alarm-on-unplug" type="b">

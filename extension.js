@@ -1,12 +1,10 @@
 /**
  * BatteryAlarm — GNOME Shell Extension
- * extension.js — Main extension logic
  *
- * Monitors battery levels via UPower DBus and plays alarm sounds
- * when user-defined thresholds are reached.
+ * Monitors battery status via UPower DBus and plays alarm sounds
+ * when configured charge thresholds are reached.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
- * Copyright (C) 2024 BatteryAlarm Contributors
  */
 
 import GLib from 'gi://GLib';
@@ -20,929 +18,524 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const UPOWER_DBUS_NAME      = 'org.freedesktop.UPower';
-const UPOWER_DBUS_PATH      = '/org/freedesktop/UPower';
-const UPOWER_DEVICE_IFACE   = 'org.freedesktop.UPower.Device';
+const UPOWER_DBUS_NAME = 'org.freedesktop.UPower';
 const UPOWER_DISPLAY_DEVICE = '/org/freedesktop/UPower/devices/DisplayDevice';
 
-// Battery states (UPower enum)
 const BatteryState = {
-    UNKNOWN:          0,
-    CHARGING:         1,
-    DISCHARGING:      2,
-    EMPTY:            3,
-    FULLY_CHARGED:    4,
-    PENDING_CHARGE:   5,
+    UNKNOWN: 0,
+    CHARGING: 1,
+    DISCHARGING: 2,
+    EMPTY: 3,
+    FULLY_CHARGED: 4,
+    PENDING_CHARGE: 5,
     PENDING_DISCHARGE: 6,
 };
-
-// How often to poll battery (ms) — fallback if DBus signals miss
-const POLL_INTERVAL_MS = 30_000;
-
-// ─── UPower DBus Interface XML ─────────────────────────────────────────────────
 
 const UPowerDeviceInterface = `
 <node>
   <interface name="org.freedesktop.UPower.Device">
-    <property name="Type"               type="u" access="read"/>
-    <property name="State"              type="u" access="read"/>
-    <property name="Percentage"         type="d" access="read"/>
-    <property name="IsPresent"          type="b" access="read"/>
-    <property name="TimeToFull"         type="x" access="read"/>
-    <property name="TimeToEmpty"        type="x" access="read"/>
+    <property name="State" type="u" access="read"/>
+    <property name="Percentage" type="d" access="read"/>
     <signal name="Changed"/>
   </interface>
 </node>`;
 
 const UPowerDeviceProxy = Gio.DBusProxy.makeProxyWrapper(UPowerDeviceInterface);
 
-// ─── BatteryMonitor ───────────────────────────────────────────────────────────
-
-/**
- * Subscribes to UPower DBus and emits 'battery-changed' with {percent, state}
- * whenever the battery status changes.
- */
-const BatteryMonitor = GObject.registerClass({
-    Signals: {
-        'battery-changed': {
-            param_types: [GObject.TYPE_DOUBLE, GObject.TYPE_UINT],
-        },
-    },
-}, class BatteryMonitor extends GObject.Object {
-    _init() {
-        super._init();
-        this._proxy = null;
-        this._propChangedId = null;
-        this._pollTimer = null;
-        this._lastPercent = -1;
-        this._lastState   = BatteryState.UNKNOWN;
-    }
-
-    async start() {
-        try {
-            this._proxy = new UPowerDeviceProxy(
-                Gio.DBus.system,
-                UPOWER_DBUS_NAME,
-                UPOWER_DISPLAY_DEVICE,
-                null
-            );
-
-            // Connect to property-changed signal for real-time updates
-            this._propChangedId = this._proxy.connect(
-                'g-properties-changed',
-                () => this._onBatteryChanged()
-            );
-
-            // Initial read
-            this._onBatteryChanged();
-
-            // Polling fallback (catches edge cases DBus signals might miss)
-            this._pollTimer = GLib.timeout_add(
-                GLib.PRIORITY_DEFAULT_IDLE,
-                POLL_INTERVAL_MS,
-                () => {
-                    this._onBatteryChanged();
-                    return GLib.SOURCE_CONTINUE;
-                }
-            );
-
-            console.log('[BatteryAlarm] Monitor started successfully');
-        } catch (e) {
-            console.error(`[BatteryAlarm] Failed to start battery monitor: ${e.message}`);
-        }
-    }
-
-    _onBatteryChanged() {
-        if (!this._proxy) return;
-
-        try {
-            const percent = this._proxy.Percentage ?? -1;
-            const state   = this._proxy.State ?? BatteryState.UNKNOWN;
-
-            // Only emit if something meaningful changed
-            if (Math.floor(percent) !== Math.floor(this._lastPercent) ||
-                state !== this._lastState) {
-                this._lastPercent = percent;
-                this._lastState   = state;
-                this.emit('battery-changed', percent, state);
-            }
-        } catch (e) {
-            console.error(`[BatteryAlarm] Error reading battery state: ${e.message}`);
-        }
-    }
-
-    getCurrentStatus() {
-        return {
-            percent: this._lastPercent,
-            state:   this._lastState,
-        };
-    }
-
-    stop() {
-        if (this._propChangedId && this._proxy) {
-            this._proxy.disconnect(this._propChangedId);
-            this._propChangedId = null;
-        }
-        if (this._pollTimer) {
-            GLib.source_remove(this._pollTimer);
-            this._pollTimer = null;
-        }
-        this._proxy = null;
-        console.log('[BatteryAlarm] Monitor stopped');
-    }
-});
-
-// ─── AlarmPlayer ──────────────────────────────────────────────────────────────
-
-/**
- * Plays alarm sounds using GSound (libcanberra) or paplay as fallback.
- * Handles repeat counts and intervals.
- */
-class AlarmPlayer {
-    constructor(extensionDir) {
-        this._extensionDir = extensionDir;
-        this._repeatTimers = [];
-        this._soundCtx     = null;
-        this._initGSound();
-    }
-
-    _initGSound() {
-        try {
-            // Dynamically import GSound — it may not be available on all systems
-            import('gi://GSound').then(({default: GSound}) => {
-                this._GSound = GSound;
-                const ctx = new GSound.Context();
-                ctx.init(null);
-                this._soundCtx = ctx;
-                console.log('[BatteryAlarm] GSound context initialized');
-            }).catch(e => {
-                console.warn(`[BatteryAlarm] GSound not available, will use paplay: ${e.message}`);
-            });
-        } catch (e) {
-            console.warn(`[BatteryAlarm] GSound init failed: ${e.message}`);
-        }
-    }
-
-    /**
-     * Play the alarm sound.
-     * @param {string} soundFile  - Absolute path or '' for bundled default
-     * @param {number} volume     - 0.0 – 1.0
-     * @param {number} repeatCount - Times to play
-     * @param {number} repeatIntervalSec - Seconds between repeats
-     */
-    play(soundFile, volume = 0.8, repeatCount = 3, repeatIntervalSec = 2) {
-        this.stop(); // Cancel any previous alarm in progress
-
-        const resolvedFile = soundFile || this._getBundledSoundPath();
-        let played = 0;
-
-        const doPlay = () => {
-            this._playSingle(resolvedFile, volume);
-            played++;
-            if (played < repeatCount) {
-                const timerId = GLib.timeout_add_seconds(
-                    GLib.PRIORITY_DEFAULT,
-                    repeatIntervalSec,
-                    () => {
-                        doPlay();
-                        return GLib.SOURCE_REMOVE;
-                    }
-                );
-                this._repeatTimers.push(timerId);
-            }
-        };
-
-        doPlay();
-    }
-
-    _playSingle(filePath, volume) {
-        if (this._soundCtx && this._GSound) {
-            try {
-                const GSound = this._GSound;
-                this._soundCtx.play_simple({
-                    [GSound.ATTR_MEDIA_FILENAME]: filePath,
-                    [GSound.ATTR_MEDIA_ROLE]:     'alarm',
-                }, null);
-                return;
-            } catch (e) {
-                console.warn(`[BatteryAlarm] GSound playback failed, falling back to paplay: ${e.message}`);
-            }
-        }
-
-        // Fallback: paplay
-        this._paplay(filePath, volume);
-    }
-
-    _paplay(filePath, volume) {
-        try {
-            // volume is 0.0–1.0, paplay --volume expects 0–65536
-            const paVolume = Math.round(volume * 65536);
-            const proc = Gio.Subprocess.new(
-                ['paplay', `--volume=${paVolume}`, filePath],
-                Gio.SubprocessFlags.NONE
-            );
-            proc.wait_check_async(null, null);
-        } catch (e) {
-            console.error(`[BatteryAlarm] paplay failed: ${e.message}`);
-            // Last resort: system beep via bell
-            try {
-                Gio.Subprocess.new(['dbus-send', '--session',
-                    '--dest=org.gnome.SettingsDaemon.MediaKeys',
-                    '/org/gnome/SettingsDaemon/MediaKeys',
-                    'org.gnome.SettingsDaemon.MediaKeys.RingBell'],
-                    Gio.SubprocessFlags.NONE);
-            } catch (_) {}
-        }
-    }
-
-    _getBundledSoundPath() {
-        return GLib.build_filenamev([this._extensionDir, 'sounds', 'battery-alarm.ogg']);
-    }
-
-    stop() {
-        for (const id of this._repeatTimers) {
-            GLib.source_remove(id);
-        }
-        this._repeatTimers = [];
-    }
-
-    destroy() {
-        this.stop();
-        this._soundCtx = null;
-    }
-}
-
-// ─── ThresholdChecker ────────────────────────────────────────────────────────
-
-/**
- * Evaluates the current battery state against user-configured thresholds
- * and decides whether to trigger an alarm.
- */
-class ThresholdChecker {
-    constructor(settings) {
-        this._settings = settings;
-    }
-
-    /**
-     * Check if any threshold should fire.
-     * Returns an array of thresholds that should trigger an alarm.
-     *
-     * @param {number} percent  - Current battery percentage
-     * @param {number} state    - UPower battery state
-     * @param {number} prevPct  - Previous battery percentage
-     * @param {number} prevState - Previous battery state
-     */
-    getTriggeredThresholds(percent, state, prevPct, prevState) {
-        const thresholds   = this._getThresholds();
-        const lastAlarmMap = this._getLastAlarmTimes();
-        const now          = Date.now();
-        const cooldownMs   = this._settings.get_int('cooldown-minutes') * 60_000;
-        const triggered    = [];
-
-        const isCharging    = state === BatteryState.CHARGING ||
-                              state === BatteryState.PENDING_CHARGE;
-        const isDischarging = state === BatteryState.DISCHARGING ||
-                              state === BatteryState.PENDING_DISCHARGE ||
-                              state === BatteryState.EMPTY;
-
-        for (const threshold of thresholds) {
-            if (!threshold.enabled) continue;
-
-            const pct = threshold.percent;
-
-            // Direction check
-            const dirMatch = (threshold.direction === 'charging'    && isCharging)    ||
-                             (threshold.direction === 'discharging' && isDischarging) ||
-                             (threshold.direction === 'any');
-            if (!dirMatch) continue;
-
-            // Threshold crossing check:
-            // We fire when percent crosses threshold from below (charging) or above (discharging)
-            let crossed = false;
-            if (threshold.direction === 'charging' || threshold.direction === 'any') {
-                // Crossing upward through threshold
-                crossed = crossed || (prevPct < pct && Math.floor(percent) >= pct);
-            }
-            if (threshold.direction === 'discharging' || threshold.direction === 'any') {
-                // Crossing downward through threshold
-                crossed = crossed || (prevPct > pct && Math.floor(percent) <= pct);
-            }
-
-            if (!crossed) continue;
-
-            // Cooldown check
-            const lastFired = lastAlarmMap[threshold.id] ?? 0;
-            if (now - lastFired < cooldownMs) {
-                console.log(`[BatteryAlarm] Threshold "${threshold.label}" suppressed (cooldown active)`);
-                continue;
-            }
-
-            triggered.push(threshold);
-        }
-
-        return triggered;
-    }
-
-    recordAlarmFired(thresholdIds) {
-        const map = this._getLastAlarmTimes();
-        const now = Date.now();
-        for (const id of thresholdIds) {
-            map[id] = now;
-        }
-        this._settings.set_string('last-alarm-times', JSON.stringify(map));
-    }
-
-    _getThresholds() {
-        try {
-            return JSON.parse(this._settings.get_string('thresholds'));
-        } catch (e) {
-            console.error(`[BatteryAlarm] Failed to parse thresholds: ${e.message}`);
-            return [];
-        }
-    }
-
-    _getLastAlarmTimes() {
-        try {
-            return JSON.parse(this._settings.get_string('last-alarm-times'));
-        } catch (_) {
-            return {};
-        }
-    }
-}
-
-// ─── QuietHoursChecker ───────────────────────────────────────────────────────
-
-/**
- * Determines whether the current time falls within quiet hours.
- */
-class QuietHoursChecker {
-    constructor(settings) {
-        this._settings = settings;
-    }
-
-    isQuietNow() {
-        if (!this._settings.get_boolean('quiet-hours-enabled')) return false;
-
-        const now   = new Date();
-        const nowMin = now.getHours() * 60 + now.getMinutes();
-
-        const start = this._parseTime(this._settings.get_string('quiet-hours-start'));
-        const end   = this._parseTime(this._settings.get_string('quiet-hours-end'));
-
-        if (start <= end) {
-            // Simple range: e.g., 09:00 – 17:00
-            return nowMin >= start && nowMin < end;
-        } else {
-            // Overnight range: e.g., 22:00 – 07:00
-            return nowMin >= start || nowMin < end;
-        }
-    }
-
-    _parseTime(timeStr) {
-        const [h, m] = timeStr.split(':').map(Number);
-        return (h || 0) * 60 + (m || 0);
-    }
-}
-
-// ─── ScreenEdgeFlasher ───────────────────────────────────────────────────────
-
-/**
- * Creates four thin overlay actors — one per screen edge — that blink with
- * a user-selected colour, providing a silent visual battery alert.
- *
- * The actors live in the chrome layer so they sit above all windows but are
- * still removed cleanly when the extension is disabled.
- */
-class ScreenEdgeFlasher {
-    /**
-     * @param {string} hexColor  - CSS hex colour string, e.g. '#00CC66'
-     * @param {number} durationSec - Seconds to flash (0 = until stop() is called)
-     */
-    constructor(hexColor, durationSec) {
-        this._hexColor   = hexColor || '#00CC66';
-        this._duration   = durationSec; // 0 means indefinite
-        this._actors     = [];
-        this._blinkTimer  = null;
-        this._stopTimer   = null;
-        this._blinkState  = true; // true = visible, false = hidden
+class VisualAlert {
+    constructor(color, durationSec) {
+        this._color = color || '#00CC66';
+        this._duration = durationSec;
+        this._actor = null;
+        this._pulseTimer = null;
+        this._stopTimer = null;
+        this._pulseState = false;
     }
 
     start() {
-        this._createActors();
-        this._startBlink();
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!monitor)
+            return;
+
+        this._actor = new St.Widget({
+            style: `border: 6px solid ${this._color}; background-color: transparent;`,
+            reactive: false,
+            can_focus: false,
+            opacity: 0,
+        });
+        this._actor.set_position(monitor.x, monitor.y);
+        this._actor.set_size(monitor.width, monitor.height);
+        Main.layoutManager.addChrome(this._actor, {trackFullscreen: true});
+
+        this._pulseTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            if (!this._actor)
+                return GLib.SOURCE_REMOVE;
+
+            this._pulseState = !this._pulseState;
+            this._actor.ease({
+                opacity: this._pulseState ? 220 : 0,
+                duration: 350,
+                mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
+            });
+            return GLib.SOURCE_CONTINUE;
+        });
 
         if (this._duration > 0) {
-            this._stopTimer = GLib.timeout_add_seconds(
-                GLib.PRIORITY_DEFAULT,
-                this._duration,
-                () => {
-                    this.stop();
-                    return GLib.SOURCE_REMOVE;
-                }
-            );
-        }
-    }
-
-    _createActors() {
-        const monitor = Main.layoutManager.primaryMonitor;
-        if (!monitor) return;
-
-        const THICKNESS = 18; // px — edge width
-        const {x, y, width, height} = monitor;
-        const color = this._hexColor;
-
-        // Define edges: [x, y, w, h]
-        const edges = [
-            [x,                          y,                           width,     THICKNESS], // top
-            [x,                          y + height - THICKNESS,      width,     THICKNESS], // bottom
-            [x,                          y + THICKNESS,               THICKNESS, height - THICKNESS * 2], // left
-            [x + width - THICKNESS,      y + THICKNESS,               THICKNESS, height - THICKNESS * 2], // right
-        ];
-
-        for (const [ex, ey, ew, eh] of edges) {
-            const actor = new St.Bin({
-                style:   `background-color: ${color};`,
-                opacity: 0,
-                reactive: false,
-                can_focus: false,
+            this._stopTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, this._duration, () => {
+                this.stop();
+                return GLib.SOURCE_REMOVE;
             });
-            actor.set_position(ex, ey);
-            actor.set_size(ew, eh);
-            Main.layoutManager.addChrome(actor, {trackFullscreen: true});
-            this._actors.push(actor);
         }
-    }
-
-    _startBlink() {
-        // Toggle opacity every 500 ms → 1 Hz blink
-        this._blinkTimer = GLib.timeout_add(
-            GLib.PRIORITY_DEFAULT,
-            500,
-            () => {
-                if (this._actors.length === 0) return GLib.SOURCE_REMOVE;
-                this._blinkState = !this._blinkState;
-                const opacity = this._blinkState ? 220 : 0;
-                for (const actor of this._actors) {
-                    actor.ease({
-                        opacity,
-                        duration: 300,
-                        mode: Clutter.AnimationMode.EASE_IN_OUT_SINE,
-                    });
-                }
-                return GLib.SOURCE_CONTINUE;
-            }
-        );
     }
 
     stop() {
-        if (this._blinkTimer) {
-            GLib.source_remove(this._blinkTimer);
-            this._blinkTimer = null;
-        }
         if (this._stopTimer) {
             GLib.source_remove(this._stopTimer);
             this._stopTimer = null;
         }
-        for (const actor of this._actors) {
-            try {
-                Main.layoutManager.removeChrome(actor);
-                actor.destroy();
-            } catch (_) {}
+        if (this._pulseTimer) {
+            GLib.source_remove(this._pulseTimer);
+            this._pulseTimer = null;
         }
-        this._actors = [];
-    }
-
-    destroy() {
-        this.stop();
+        if (this._actor) {
+            Main.layoutManager.removeChrome(this._actor);
+            this._actor.destroy();
+            this._actor = null;
+        }
     }
 }
 
-// ─── Panel Indicator ─────────────────────────────────────────────────────────
-
 const BatteryAlarmIndicator = GObject.registerClass(
 class BatteryAlarmIndicator extends PanelMenu.Button {
-    _init(settings, onMuteToggle) {
+    _init(settings, onOpenPrefs) {
         super._init(0.0, _('BatteryAlarm'));
 
         this._settings = settings;
-        this._onMuteToggle = onMuteToggle;
-        this._muted = settings.get_boolean('muted');
-        this._flashTimeoutId = null;
+        this._onOpenPrefs = onOpenPrefs;
+        this._onStopAlarm = null;
+        this._flashTimeout = null;
 
-        // ── Icon + Label box ──
-        this._box = new St.BoxLayout({
+        const box = new St.BoxLayout({
             style_class: 'battery-alarm-panel-box',
             vertical: false,
         });
-        this.add_child(this._box);
+        this.add_child(box);
 
         this._icon = new St.Icon({
             gicon: this._getIcon(),
             style_class: 'system-status-icon battery-alarm-icon',
         });
-        this._box.add_child(this._icon);
+        box.add_child(this._icon);
 
         this._label = new St.Label({
             text: '',
             y_align: Clutter.ActorAlign.CENTER,
             style_class: 'battery-alarm-panel-label',
         });
-        this._box.add_child(this._label);
+        box.add_child(this._label);
 
-        // ── Menu ──
         this._buildMenu();
 
-        // ── Settings change listener ──
-        this._settingsSignal = settings.connect('changed', () => this._onSettingsChanged());
+        this._settingsChangedId = this._settings.connect('changed', () => this._onSettingsChanged());
         this._updateLabelVisibility();
     }
 
     _buildMenu() {
-        // Header: extension name
-        const headerItem = new PopupMenu.PopupMenuItem(_('BatteryAlarm'), {
-            reactive: false,
-            style_class: 'battery-alarm-menu-header',
-        });
-        this.menu.addMenuItem(headerItem);
+        const header = new PopupMenu.PopupMenuItem(_('BatteryAlarm'), {reactive: false});
+        this.menu.addMenuItem(header);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Battery status display
         this._statusItem = new PopupMenu.PopupMenuItem('', {reactive: false});
         this.menu.addMenuItem(this._statusItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // ── Stop Alarm button (hidden until an alarm is active) ──
-        this._stopAlarmItem = new PopupMenu.PopupMenuItem(
-            _('⛔  Stop Alarm Now'),
-            {style_class: 'battery-alarm-stop-item'}
-        );
-        this._stopAlarmItem.connect('activate', () => {
+        this._stopItem = new PopupMenu.PopupMenuItem(_('Stop Alarm Now'));
+        this._stopItem.connect('activate', () => {
             this.menu.close();
             this._onStopAlarm?.();
         });
-        this._stopAlarmItem.actor.hide();
-        this.menu.addMenuItem(this._stopAlarmItem);
+        this._stopItem.actor.hide();
+        this.menu.addMenuItem(this._stopItem);
 
         this._stopSeparator = new PopupMenu.PopupSeparatorMenuItem();
         this._stopSeparator.actor.hide();
         this.menu.addMenuItem(this._stopSeparator);
 
-        // Mute toggle
-        this._muteSwitch = new PopupMenu.PopupSwitchMenuItem(
-            _('Mute All Alarms'),
-            this._muted
-        );
+        const muted = this._settings.get_boolean('muted');
+        this._muteSwitch = new PopupMenu.PopupSwitchMenuItem(_('Mute All Alarms'), muted);
         this._muteSwitch.connect('toggled', (_, state) => {
-            this._muted = state;
             this._settings.set_boolean('muted', state);
-            this._updateIcon();
-            this._onMuteToggle?.(state);
         });
         this.menu.addMenuItem(this._muteSwitch);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Open preferences
         const prefsItem = new PopupMenu.PopupMenuItem(_('Settings…'));
         prefsItem.connect('activate', () => {
             this.menu.close();
-            // Extension reference is resolved at runtime
-            this._openPrefs?.();
+            this._onOpenPrefs?.();
         });
         this.menu.addMenuItem(prefsItem);
     }
 
-    /**
-     * Show the "Stop Alarm Now" button in the panel menu.
-     * @param {Function} callback - Called when the user taps the stop button.
-     */
     showStopButton(callback) {
         this._onStopAlarm = callback;
-        this._stopAlarmItem?.actor.show();
-        this._stopSeparator?.actor.show();
+        this._stopItem.actor.show();
+        this._stopSeparator.actor.show();
     }
 
-    /** Hide the "Stop Alarm Now" button once the alarm has ended. */
     hideStopButton() {
         this._onStopAlarm = null;
-        this._stopAlarmItem?.actor.hide();
-        this._stopSeparator?.actor.hide();
+        this._stopItem.actor.hide();
+        this._stopSeparator.actor.hide();
     }
 
     updateBatteryStatus(percent, state) {
-        this._currentPercent = percent;
-        this._currentState   = state;
-
-        if (this._settings.get_boolean('show-percentage-in-panel') && percent >= 0) {
+        if (this._settings.get_boolean('show-percentage-in-panel') && percent >= 0)
             this._label.text = ` ${Math.round(percent)}%`;
-        } else {
+        else
             this._label.text = '';
-        }
 
-        let stateStr = '';
+        let stateStr;
         switch (state) {
-        case BatteryState.CHARGING:         stateStr = _('Charging');       break;
-        case BatteryState.DISCHARGING:      stateStr = _('Discharging');    break;
-        case BatteryState.FULLY_CHARGED:    stateStr = _('Fully Charged');  break;
-        case BatteryState.EMPTY:            stateStr = _('Empty');          break;
-        case BatteryState.PENDING_CHARGE:   stateStr = _('Pending Charge'); break;
-        default:                            stateStr = _('Unknown');
+        case BatteryState.CHARGING:
+            stateStr = _('Charging');
+            break;
+        case BatteryState.DISCHARGING:
+            stateStr = _('Discharging');
+            break;
+        case BatteryState.FULLY_CHARGED:
+            stateStr = _('Fully Charged');
+            break;
+        case BatteryState.EMPTY:
+            stateStr = _('Empty');
+            break;
+        case BatteryState.PENDING_CHARGE:
+            stateStr = _('Pending Charge');
+            break;
+        default:
+            stateStr = _('Unknown');
         }
 
-        if (this._statusItem) {
-            this._statusItem.label.text =
-                percent >= 0
-                    ? `🔋 ${Math.round(percent)}%  •  ${stateStr}`
-                    : `🔋 ${stateStr}`;
-        }
+        const pctText = percent >= 0 ? `${Math.round(percent)}%` : '--%';
+        this._statusItem.label.text = `${pctText} • ${stateStr}`;
     }
 
-    flashAlarm(thresholdLabel) {
-        if (!this._icon) return;
-        if (this._flashTimeoutId) {
-            GLib.source_remove(this._flashTimeoutId);
-            this._flashTimeoutId = null;
+    flashIcon() {
+        if (!this._icon)
+            return;
+
+        if (this._flashTimeout) {
+            GLib.source_remove(this._flashTimeout);
+            this._flashTimeout = null;
         }
+
         this._icon.add_style_class_name('battery-alarm-flash');
-        this._flashTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
-            if (this._icon) {
+        this._flashTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
+            if (this._icon)
                 this._icon.remove_style_class_name('battery-alarm-flash');
-            }
-            this._flashTimeoutId = null;
+            this._flashTimeout = null;
             return GLib.SOURCE_REMOVE;
         });
     }
 
     _onSettingsChanged() {
-        this._muted = this._settings.get_boolean('muted');
-        this._muteSwitch?.setToggleState(this._muted);
-        this._updateIcon();
+        const muted = this._settings.get_boolean('muted');
+        this._muteSwitch?.setToggleState(muted);
+        this._icon.gicon = this._getIcon();
         this._updateLabelVisibility();
     }
 
-    _updateIcon() {
-        this._icon.gicon = this._getIcon();
-    }
-
     _updateLabelVisibility() {
-        const show = this._settings.get_boolean('show-percentage-in-panel');
-        this._label.visible = show;
+        this._label.visible = this._settings.get_boolean('show-percentage-in-panel');
     }
 
     _getIcon() {
-        const iconName = this._muted
+        const iconName = this._settings.get_boolean('muted')
             ? 'battery-alarm-muted-symbolic'
             : 'battery-alarm-symbolic';
-        // Try extension icon first, fall back to system icon
         return Gio.ThemedIcon.new_with_default_fallbacks(iconName);
     }
 
     destroy() {
-        if (this._flashTimeoutId) {
-            GLib.source_remove(this._flashTimeoutId);
-            this._flashTimeoutId = null;
+        if (this._flashTimeout) {
+            GLib.source_remove(this._flashTimeout);
+            this._flashTimeout = null;
         }
-        if (this._settingsSignal) {
-            this._settings.disconnect(this._settingsSignal);
-            this._settingsSignal = null;
+        if (this._settingsChangedId) {
+            this._settings.disconnect(this._settingsChangedId);
+            this._settingsChangedId = null;
         }
         super.destroy();
     }
 });
 
-// ─── Main Extension Class ─────────────────────────────────────────────────────
-
 export default class BatteryAlarmExtension extends Extension {
     enable() {
-        console.log('[BatteryAlarm] Enabling extension…');
-
-        this._settings    = this.getSettings();
-        this._extensionDir = this.path;
-
-        // Core components
-        this._monitor  = new BatteryMonitor();
-        this._player   = new AlarmPlayer(this._extensionDir);
-        this._checker  = new ThresholdChecker(this._settings);
-        this._quietChk = new QuietHoursChecker(this._settings);
-
-        // Alarm state tracking
-        this._alarmActive   = false;
-        this._edgeFlasher   = null;
-
-        // Previous battery state (for crossing detection)
+        this._settings = this.getSettings();
+        this._lastAlarmTimes = new Map();
+        this._alarmActive = false;
         this._prevPercent = -1;
-        this._prevState   = BatteryState.UNKNOWN;
-
-        // Panel indicator
+        this._prevState = BatteryState.UNKNOWN;
+        this._soundTimerId = null;
+        this._soundCancellable = null;
+        this._visualAlert = null;
         this._indicator = null;
-        if (this._settings.get_boolean('show-panel-indicator')) {
+
+        if (this._settings.get_boolean('show-panel-indicator'))
             this._createIndicator();
-        }
 
-        // Settings change handler (e.g., show-panel-indicator toggled)
-        this._settingsChangedId = this._settings.connect(
+        this._panelSettingId = this._settings.connect(
             'changed::show-panel-indicator',
-            () => this._onPanelIndicatorSettingChanged()
+            () => this._syncIndicatorVisibility()
         );
 
-        // Connect to battery monitor
-        this._batteryChangedId = this._monitor.connect(
-            'battery-changed',
-            (_, percent, state) => this._onBatteryChanged(percent, state)
+        this._proxy = new UPowerDeviceProxy(
+            Gio.DBus.system,
+            UPOWER_DBUS_NAME,
+            UPOWER_DISPLAY_DEVICE,
+            (proxy, error) => {
+                if (error) {
+                    console.error(`BatteryAlarm: Failed to connect to UPower: ${error.message}`);
+                    return;
+                }
+                this._onBatteryChanged();
+            }
         );
 
-        // Start monitoring
-        this._monitor.start();
-
-        console.log('[BatteryAlarm] Extension enabled');
+        this._propChangedId = this._proxy.connect(
+            'g-properties-changed',
+            () => this._onBatteryChanged()
+        );
     }
 
     disable() {
-        console.log('[BatteryAlarm] Disabling extension…');
-
-        if (this._batteryChangedId && this._monitor) {
-            this._monitor.disconnect(this._batteryChangedId);
-            this._batteryChangedId = null;
-        }
-
-        if (this._settingsChangedId && this._settings) {
-            this._settings.disconnect(this._settingsChangedId);
-            this._settingsChangedId = null;
-        }
-
-        // Stop any active alarm immediately
         this._stopActiveAlarm();
 
-        this._monitor?.stop();
-        this._player?.destroy();
-        this._indicator?.destroy();
+        if (this._propChangedId && this._proxy) {
+            this._proxy.disconnect(this._propChangedId);
+            this._propChangedId = null;
+        }
+        this._proxy = null;
 
-        this._monitor   = null;
-        this._player    = null;
-        this._checker   = null;
-        this._quietChk  = null;
-        this._indicator = null;
-        this._settings  = null;
+        if (this._panelSettingId && this._settings) {
+            this._settings.disconnect(this._panelSettingId);
+            this._panelSettingId = null;
+        }
 
-        console.log('[BatteryAlarm] Extension disabled');
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
+
+        this._lastAlarmTimes.clear();
+        this._settings = null;
     }
 
     _createIndicator() {
         this._indicator = new BatteryAlarmIndicator(
             this._settings,
-            muted => console.log(`[BatteryAlarm] Mute toggled: ${muted}`)
+            () => this.openPreferences()
         );
-        // Expose openPrefs to indicator menu
-        this._indicator._openPrefs = () => this.openPreferences();
-
         Main.panel.addToStatusArea('battery-alarm', this._indicator);
 
-        // Update with current battery status
-        const {percent, state} = this._monitor.getCurrentStatus();
-        if (percent >= 0) {
+        if (this._proxy) {
+            const percent = this._proxy.Percentage ?? -1;
+            const state = this._proxy.State ?? BatteryState.UNKNOWN;
             this._indicator.updateBatteryStatus(percent, state);
         }
     }
 
-    _onPanelIndicatorSettingChanged() {
-        const shouldShow = this._settings.get_boolean('show-panel-indicator');
-        if (shouldShow && !this._indicator) {
+    _syncIndicatorVisibility() {
+        const show = this._settings.get_boolean('show-panel-indicator');
+        if (show && !this._indicator) {
             this._createIndicator();
-        } else if (!shouldShow && this._indicator) {
+        } else if (!show && this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
         }
     }
 
-    _onBatteryChanged(percent, state) {
-        // Update panel indicator
+    _onBatteryChanged() {
+        if (!this._proxy)
+            return;
+
+        const percent = this._proxy.Percentage ?? -1;
+        const state = this._proxy.State ?? BatteryState.UNKNOWN;
+
         this._indicator?.updateBatteryStatus(percent, state);
 
-        // ── Auto-stop on charger unplug ──────────────────────────────────────
-        // If an alarm is currently firing and the state just transitioned to
-        // DISCHARGING (charger physically removed), stop everything immediately.
+        // Auto-silence when charger is disconnected
         if (this._alarmActive &&
-            this._settings?.get_boolean('stop-alarm-on-unplug') &&
+            this._settings.get_boolean('stop-alarm-on-unplug') &&
             this._prevState !== BatteryState.DISCHARGING &&
             this._prevState !== BatteryState.UNKNOWN &&
-            (state === BatteryState.DISCHARGING ||
-             state === BatteryState.PENDING_DISCHARGE)) {
-            console.log('[BatteryAlarm] Charger unplugged — stopping active alarm');
+            (state === BatteryState.DISCHARGING || state === BatteryState.PENDING_DISCHARGE)) {
             this._stopActiveAlarm();
         }
 
-        // Check thresholds (skip if first read or muted globally)
-        if (this._prevPercent >= 0) {
-            if (!this._settings.get_boolean('muted')) {
-                this._checkThresholds(percent, state);
-            }
-        }
+        if (this._prevPercent >= 0 && !this._settings.get_boolean('muted'))
+            this._evaluateThresholds(percent, state);
 
         this._prevPercent = percent;
-        this._prevState   = state;
+        this._prevState = state;
     }
 
-    /**
-     * Stop all active alarm output: sound + screen-edge flash + panel button.
-     * Safe to call even if no alarm is active.
-     */
-    _stopActiveAlarm() {
-        this._alarmActive = false;
+    _evaluateThresholds(percent, state) {
+        if (this._isQuietTime())
+            return;
 
-        // Stop sound
-        this._player?.stop();
-
-        // Stop visual edge flash
-        if (this._edgeFlasher) {
-            this._edgeFlasher.stop();
-            this._edgeFlasher = null;
-        }
-
-        // Hide the stop button in the panel menu
-        this._indicator?.hideStopButton();
-
-        console.log('[BatteryAlarm] Alarm stopped');
-    }
-
-    _checkThresholds(percent, state) {
-        // Check quiet hours
-        if (this._quietChk.isQuietNow()) {
-            console.log('[BatteryAlarm] Quiet hours active — suppressing alarm check');
+        let thresholds = [];
+        try {
+            thresholds = JSON.parse(this._settings.get_string('thresholds'));
+        } catch {
             return;
         }
 
-        const triggered = this._checker.getTriggeredThresholds(
-            percent, state, this._prevPercent, this._prevState
-        );
+        const now = Date.now();
+        const cooldownMs = this._settings.get_int('cooldown-minutes') * 60_000;
+        const isCharging = state === BatteryState.CHARGING || state === BatteryState.PENDING_CHARGE;
+        const isDischarging = state === BatteryState.DISCHARGING ||
+                              state === BatteryState.PENDING_DISCHARGE ||
+                              state === BatteryState.EMPTY;
 
-        if (triggered.length === 0) return;
+        for (const threshold of thresholds) {
+            if (!threshold.enabled)
+                continue;
 
-        for (const threshold of triggered) {
-            console.log(`[BatteryAlarm] Threshold triggered: "${threshold.label}" at ${Math.round(percent)}%`);
+            const dirMatch = (threshold.direction === 'charging' && isCharging) ||
+                             (threshold.direction === 'discharging' && isDischarging) ||
+                             (threshold.direction === 'any');
+            if (!dirMatch)
+                continue;
+
+            let crossed = false;
+            if (threshold.direction === 'charging' || threshold.direction === 'any')
+                crossed = crossed || (this._prevPercent < threshold.percent && Math.floor(percent) >= threshold.percent);
+
+            if (threshold.direction === 'discharging' || threshold.direction === 'any')
+                crossed = crossed || (this._prevPercent > threshold.percent && Math.floor(percent) <= threshold.percent);
+
+            if (!crossed)
+                continue;
+
+            const lastFired = this._lastAlarmTimes.get(threshold.id) ?? 0;
+            if (now - lastFired < cooldownMs)
+                continue;
+
+            this._lastAlarmTimes.set(threshold.id, now);
             this._triggerAlarm(threshold, percent);
         }
-
-        // Record all fired thresholds for cooldown
-        this._checker.recordAlarmFired(triggered.map(t => t.id));
     }
 
-    _triggerAlarm(threshold, currentPercent) {
-        // Mark alarm as active
+    _triggerAlarm(threshold, percent) {
         this._alarmActive = true;
 
-        // ── Sound ────────────────────────────────────────────────────────────
-        if (this._settings.get_boolean('sound-enabled')) {
-            this._player.play(
-                this._settings.get_string('sound-file'),
-                this._settings.get_double('alarm-volume'),
-                this._settings.get_int('repeat-count'),
-                this._settings.get_int('repeat-interval')
-            );
-        }
-
-        // ── GNOME Notification ───────────────────────────────────────────────
         if (this._settings.get_boolean('notifications-enabled')) {
-            this._showNotification(threshold, currentPercent);
+            const title = threshold.label || _('Battery Alarm');
+            const directionText = threshold.direction === 'charging'
+                ? _('while charging')
+                : threshold.direction === 'discharging'
+                    ? _('while discharging')
+                    : '';
+            const body = `${_('Battery is at')} ${Math.round(percent)}% ${directionText}.`.trim();
+            Main.notify(title, body);
         }
 
-        // ── Panel icon flash ─────────────────────────────────────────────────
-        this._indicator?.flashAlarm(threshold.label);
+        if (this._settings.get_boolean('sound-enabled'))
+            this._playSound();
 
-        // ── Screen-edge visual alert ─────────────────────────────────────────
+        this._indicator?.flashIcon();
+
         if (this._settings.get_boolean('visual-alert-enabled')) {
-            // Stop any prior flasher before creating a new one
-            if (this._edgeFlasher) {
-                this._edgeFlasher.stop();
-                this._edgeFlasher = null;
-            }
-            const color    = this._settings.get_string('visual-alert-color');
+            this._visualAlert?.stop();
+            const color = this._settings.get_string('visual-alert-color');
             const duration = this._settings.get_int('visual-alert-duration');
-            this._edgeFlasher = new ScreenEdgeFlasher(color, duration);
-            this._edgeFlasher.start();
+            this._visualAlert = new VisualAlert(color, duration);
+            this._visualAlert.start();
         }
 
-        // ── Show Stop button in panel menu ───────────────────────────────────
-        this._indicator?.showStopButton(() => {
-            console.log('[BatteryAlarm] User manually stopped alarm');
-            this._stopActiveAlarm();
-        });
+        this._indicator?.showStopButton(() => this._stopActiveAlarm());
     }
 
-    _showNotification(threshold, percent) {
-        const title = threshold.label || _('Battery Alarm');
-        const dirStr = threshold.direction === 'charging'
-            ? _('while charging')
-            : threshold.direction === 'discharging'
-                ? _('while discharging')
-                : '';
+    _playSound() {
+        this._stopSound();
 
-        const body = _(`Battery is at ${Math.round(percent)}% ${dirStr}`.trim() + '.');
+        const customPath = this._settings.get_string('sound-file');
+        const defaultPath = GLib.build_filenamev([this.path, 'sounds', 'battery-alarm.ogg']);
+        const soundPath = customPath && GLib.file_test(customPath, GLib.FileTest.EXISTS)
+            ? customPath
+            : defaultPath;
 
-        // GNOME Shell notification via Main.notify
-        Main.notify(title, body);
+        const file = Gio.File.new_for_path(soundPath);
+        const repeatCount = this._settings.get_int('repeat-count');
+        const repeatInterval = this._settings.get_int('repeat-interval');
+        const player = global.display.get_sound_player();
+        let played = 0;
+
+        const playOnce = () => {
+            this._soundCancellable = new Gio.Cancellable();
+            player.play_from_file(file, 'Battery Alarm', this._soundCancellable);
+            played++;
+
+            if (played < repeatCount) {
+                this._soundTimerId = GLib.timeout_add_seconds(
+                    GLib.PRIORITY_DEFAULT,
+                    repeatInterval,
+                    () => {
+                        this._soundTimerId = null;
+                        playOnce();
+                        return GLib.SOURCE_REMOVE;
+                    }
+                );
+            }
+        };
+
+        playOnce();
+    }
+
+    _stopSound() {
+        if (this._soundTimerId) {
+            GLib.source_remove(this._soundTimerId);
+            this._soundTimerId = null;
+        }
+        if (this._soundCancellable) {
+            this._soundCancellable.cancel();
+            this._soundCancellable = null;
+        }
+    }
+
+    _stopActiveAlarm() {
+        this._alarmActive = false;
+        this._stopSound();
+
+        if (this._visualAlert) {
+            this._visualAlert.stop();
+            this._visualAlert = null;
+        }
+
+        this._indicator?.hideStopButton();
+    }
+
+    _isQuietTime() {
+        if (!this._settings.get_boolean('quiet-hours-enabled'))
+            return false;
+
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+        const parseTime = str => {
+            const [h, m] = (str || '').split(':').map(Number);
+            return (h || 0) * 60 + (m || 0);
+        };
+
+        const start = parseTime(this._settings.get_string('quiet-hours-start'));
+        const end = parseTime(this._settings.get_string('quiet-hours-end'));
+
+        return start <= end
+            ? currentMinutes >= start && currentMinutes < end
+            : currentMinutes >= start || currentMinutes < end;
     }
 }

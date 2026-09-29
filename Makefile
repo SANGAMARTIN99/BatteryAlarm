@@ -99,18 +99,32 @@ dev: install enable
 
 ## ── Package for distribution ──────────────────────────────────────────────────
 
-pack: _check_deps _compile_schemas
+pack: clean
 	@mkdir -p $(DIST_DIR)
-	@rm -f $(DIST_DIR)/$(UUID).zip
-	@zip -r $(DIST_DIR)/$(UUID).zip \
-		$(PORTAL_FILES) \
-		$(EXISTING_DIRS) \
-		--exclude '*.pyc' \
-		--exclude '*/__pycache__/*' \
-		--exclude '*/.*'
+	@if command -v gnome-extensions >/dev/null 2>&1; then \
+		gnome-extensions pack \
+			--extra-source=icons \
+			--extra-source=sounds \
+			--schema=schemas/org.gnome.shell.extensions.battery-alarm.gschema.xml \
+			--out-dir=$(DIST_DIR) \
+			--force \
+			.; \
+		cp -f $(DIST_DIR)/$(UUID).shell-extension.zip $(DIST_DIR)/$(UUID).zip 2>/dev/null || true; \
+	else \
+		zip -r $(DIST_DIR)/$(UUID).zip \
+			metadata.json \
+			extension.js \
+			prefs.js \
+			icons/ \
+			sounds/ \
+			schemas/org.gnome.shell.extensions.battery-alarm.gschema.xml \
+			--exclude '*.pyc' \
+			--exclude '*/__pycache__/*' \
+			--exclude '*/.*' \
+			--exclude 'schemas/gschemas.compiled'; \
+	fi
 	@echo "✅ Extension packaged: $(DIST_DIR)/$(UUID).zip"
 	@echo "   Upload this file to: https://extensions.gnome.org/upload/"
-	@echo "   Contains: $(PORTAL_FILES) + directories: $(EXISTING_DIRS)"
 
 ## ── Translations template ───────────────────────────────────────────────────
 
